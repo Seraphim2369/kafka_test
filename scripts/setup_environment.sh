@@ -1,3 +1,4 @@
+
 #!/bin/bash
 set -e
 
@@ -16,12 +17,14 @@ sudo systemctl enable docker
 # Add ec2-user to docker group
 sudo usermod -a -G docker ec2-user
 
-# Install Docker Compose
+# Install Docker Compose Plugin (newer method)
+sudo mkdir -p /usr/local/lib/docker/cli-plugins
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/lib/docker/cli-plugins/docker-compose
+sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+# Alternative: Install as standalone (fallback)
 sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
 sudo chmod +x /usr/local/bin/docker-compose
-
-# Create symbolic link for easier access
-sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
 
 # Install Git (if not already installed)
 sudo yum install git -y
@@ -42,7 +45,7 @@ sudo yum install htop curl wget telnet nc -y
 # Verify installation
 echo "Checking installations..."
 docker --version
-docker-compose --version
+docker compose version
 python3 --version
 git --version
 
