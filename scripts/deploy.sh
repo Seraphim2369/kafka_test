@@ -15,14 +15,14 @@ sed -i "s|KAFKA_ADVERTISED_LISTENERS:.*|KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://
 
 # Stop existing services gracefully
 echo "Stopping existing services..."
-docker-compose down --remove-orphans || true
+docker compose down --remove-orphans || true
 
 # Clean up old containers and images (optional)
 docker system prune -f || true
 
 # Pull latest images
 echo "Pulling latest images..."
-docker-compose pull
+docker compose pull
 
 # Create necessary directories
 mkdir -p airflow/logs airflow/plugins spark/jobs spark/tests
@@ -33,7 +33,7 @@ chmod -R 755 airflow/
 
 # Build and start services
 echo "Starting services..."
-docker-compose up -d
+docker compose up -d
 
 # Wait for services to be ready
 echo "Waiting for services to start..."
@@ -41,15 +41,15 @@ sleep 60
 
 # Check if services are running
 echo "Checking service status..."
-docker-compose ps
+docker compose ps
 
 # Initialize Airflow database (only if not already initialized)
 echo "Initializing Airflow..."
-docker-compose exec -T airflow-webserver airflow db init || echo "DB already initialized"
+docker compose exec -T airflow-webserver airflow db init || echo "DB already initialized"
 
 # Create Airflow admin user
 echo "Creating Airflow admin user..."
-docker-compose exec -T airflow-webserver airflow users create \
+docker compose exec -T airflow-webserver airflow users create \
     --username admin \
     --firstname Admin \
     --lastname User \
@@ -62,12 +62,12 @@ sleep 30
 
 # Create Kafka topics
 echo "Creating Kafka topics..."
-docker-compose exec -T kafka kafka-topics.sh --create --topic spark-input --bootstrap-server localhost:9092 --partitions 3 --replication-factor 1 || echo "Topic already exists"
-docker-compose exec -T kafka kafka-topics.sh --create --topic spark-output --bootstrap-server localhost:9092 --partitions 3 --replication-factor 1 || echo "Topic already exists"
+docker compose exec -T kafka kafka-topics.sh --create --topic spark-input --bootstrap-server localhost:9092 --partitions 3 --replication-factor 1 || echo "Topic already exists"
+docker compose exec -T kafka kafka-topics.sh --create --topic spark-output --bootstrap-server localhost:9092 --partitions 3 --replication-factor 1 || echo "Topic already exists"
 
 # List created topics
 echo "Listing Kafka topics..."
-docker-compose exec -T kafka kafka-topics.sh --list --bootstrap-server localhost:9092
+docker compose exec -T kafka kafka-topics.sh --list --bootstrap-server localhost:9092
 
 echo "Deployment completed successfully!"
 echo "Services available at:"
@@ -78,4 +78,4 @@ echo "- Zookeeper: $EC2_PUBLIC_IP:2181"
 
 # Display service status
 echo -e "\nService Status:"
-docker-compose ps
+docker compose ps
