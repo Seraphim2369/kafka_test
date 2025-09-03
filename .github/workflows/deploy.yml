@@ -47,22 +47,70 @@ jobs:
 
       - name: Deploy to Amazon Linux EC2
         uses: appleboy/ssh-action@v0.1.10
+        env:
+          REPO_URL: https://github.com/${{ github.repository }}.git
+          BRANCH: main
+          PROJECT_PATH: ${{ secrets.PROJECT_PATH }}
+          # Optional: if repo is private, add a GitHub token secret and uncomment usage below
+          # GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            # Navigate to project directory
-            cd ${{ secrets.PROJECT_PATH }}
+            set -euo pipefail
             
-            # Pull latest changes
-            git pull origin main
+            # Ensure environment (Docker / Compose) is installed first
+            if [ -x "./scripts/setup_environment.sh" ]; then
+              ./scripts/setup_environment.sh || true
+            else
+              # If repo isn't present yet, install base tools first
+              sudo yum update -y || true
+              sudo yum install -y git || true
+            fi
+            
+            # Ensure PROJECT_PATH is set
+            if [ -z "${PROJECT_PATH:-}" ]; then
+              echo "Error: PROJECT_PATH secret is not set."
+              exit 1
+            fi
+            
+            # Prepare parent dir and clone if missing
+            PARENT_DIR="$(dirname "$PROJECT_PATH")"
+            mkdir -p "$PARENT_DIR"
+            
+            if [ ! -d "$PROJECT_PATH" ]; then
+              echo "Project path not found. Cloning repository..."
+              # For private repos, use token: REPO_URL="https://x-access-token:${GIT_TOKEN}@github.com/owner/repo.git"
+              git clone "${REPO_URL}" "$PROJECT_PATH"
+            fi
+            
+            cd "$PROJECT_PATH"
+            
+            # If not a git repo (or corrupted), reclone cleanly
+            if [ ! -d ".git" ]; then
+              echo "Directory exists but is not a git repo. Re-cloning..."
+              cd "$PARENT_DIR"
+              rm -rf "$PROJECT_PATH"
+              git clone "${REPO_URL}" "$PROJECT_PATH"
+              cd "$PROJECT_PATH"
+            fi
+            
+            # Fetch and checkout target branch
+            git fetch origin
+            git checkout "${BRANCH}"
+            git reset --hard "origin/${BRANCH}"
+            git pull --rebase origin "${BRANCH}"
             
             # Make scripts executable
-            chmod +x scripts/*.sh
+            if [ -d "scripts" ]; then
+              chmod +x scripts/*.sh || true
+            fi
             
-            # Ensure environment (Docker / Compose) is installed
-            ./scripts/setup_environment.sh
+            # Ensure environment (Docker / Compose) is installed (now that repo exists)
+            if [ -x "./scripts/setup_environment.sh" ]; then
+              ./scripts/setup_environment.sh
+            fi
             
             # Run Airflow-only deployment
             AIRFLOW_ONLY=1 ./scripts/deploy.sh
@@ -70,3 +118,4 @@ jobs:
             # Show final status
             echo "Deployment completed. Checking final status..."
             docker compose ps
+  
