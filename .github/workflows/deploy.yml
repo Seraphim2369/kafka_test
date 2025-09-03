@@ -61,8 +61,11 @@ jobs:
             # Make scripts executable
             chmod +x scripts/*.sh
             
-            # Run deployment
-            ./scripts/deploy.sh
+            # Ensure environment (Docker / Compose) is installed
+            ./scripts/setup_environment.sh
+            
+            # Run Airflow-only deployment
+            AIRFLOW_ONLY=1 ./scripts/deploy.sh
             
             # Show final status
             echo "Deployment completed. Checking final status..."

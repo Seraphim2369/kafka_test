@@ -23,7 +23,7 @@ fi
 
 # Get EC2 Public IP with fallback
 EC2_PUBLIC_IP=$(curl -s --connect-timeout 5 http://169.254.169.254/latest/meta-data/public-ipv4 || echo "")
-
+# ... existing code ...
 if [ -z "$EC2_PUBLIC_IP" ]; then
     echo "Warning: Could not retrieve EC2 public IP, using localhost"
     EC2_PUBLIC_IP="localhost"
@@ -35,6 +35,74 @@ echo "Using IP: $EC2_PUBLIC_IP"
 cp docker-compose.yml docker-compose.yml.backup
 
 # Create a clean docker-compose.yml with proper indentation
+# If AIRFLOW_ONLY=1, write only Airflow + Postgres services
+if [ "${AIRFLOW_ONLY:-0}" = "1" ]; then
+cat > docker-compose.yml << EOF
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_db_volume:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  airflow-webserver:
+    image: apache/airflow:2.7.1-python3.11
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: ''
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth'
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./spark:/opt/spark
+    ports:
+      - "8080:8080"
+    command: webserver
+    depends_on:
+      - postgres
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  airflow-scheduler:
+    image: apache/airflow:2.7.1-python3.11
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: ''
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./spark:/opt/spark
+    command: scheduler
+    depends_on:
+      - postgres
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+volumes:
+  postgres_db_volume:
+EOF
+else
 cat > docker-compose.yml << EOF
 services:
   zookeeper:
@@ -169,6 +237,7 @@ services:
 volumes:
   postgres_db_volume:
 EOF
+fi
 
 echo "Created clean docker-compose.yml with IP: $EC2_PUBLIC_IP"
 
@@ -210,7 +279,7 @@ docker compose up -d
 
 # Wait for services to be ready
 echo "Waiting for services to start..."
-sleep 60
+sleep 45
 
 # Check if services are running
 echo "Checking service status..."
@@ -230,24 +299,24 @@ docker compose exec -T airflow-webserver airflow users create \
     --email admin@example.com \
     --password admin 2>/dev/null || echo "User already exists or service not ready"
 
-# Wait a bit more for Kafka to be fully ready
-sleep 30
+# If not AIRFLOW_ONLY, set up Kafka topics (skipped for UI-only demo)
+if [ "${AIRFLOW_ONLY:-0}" != "1" ]; then
+  echo "Creating Kafka topics..."
+  docker compose exec -T kafka kafka-topics.sh --create --topic spark-input --bootstrap-server localhost:9092 --partitions 3 --replication-factor 1 2>/dev/null || echo "Topic already exists"
+  docker compose exec -T kafka kafka-topics.sh --create --topic spark-output --bootstrap-server localhost:9092 --partitions 3 --replication-factor 1 2>/dev/null || echo "Topic already exists"
 
-# Create Kafka topics
-echo "Creating Kafka topics..."
-docker compose exec -T kafka kafka-topics.sh --create --topic spark-input --bootstrap-server localhost:9092 --partitions 3 --replication-factor 1 2>/dev/null || echo "Topic already exists"
-docker compose exec -T kafka kafka-topics.sh --create --topic spark-output --bootstrap-server localhost:9092 --partitions 3 --replication-factor 1 2>/dev/null || echo "Topic already exists"
-
-# List created topics
-echo "Listing Kafka topics..."
-docker compose exec -T kafka kafka-topics.sh --list --bootstrap-server localhost:9092 2>/dev/null || echo "Kafka not ready yet"
+  echo "Listing Kafka topics..."
+  docker compose exec -T kafka kafka-topics.sh --list --bootstrap-server localhost:9092 2>/dev/null || echo "Kafka not ready yet"
+fi
 
 echo "Deployment completed successfully!"
 echo "Services available at:"
 echo "- Airflow UI: http://$EC2_PUBLIC_IP:8080 (admin/admin)"
-echo "- Spark UI: http://$EC2_PUBLIC_IP:8081"
-echo "- Kafka: $EC2_PUBLIC_IP:9092"
-echo "- Zookeeper: $EC2_PUBLIC_IP:2181"
+if [ "${AIRFLOW_ONLY:-0}" != "1" ]; then
+  echo "- Spark UI: http://$EC2_PUBLIC_IP:8081"
+  echo "- Kafka: $EC2_PUBLIC_IP:9092"
+  echo "- Zookeeper: $EC2_PUBLIC_IP:2181"
+fi
 
 # Display service status
 echo -e "\nService Status:"
